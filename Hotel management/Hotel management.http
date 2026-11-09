@@ -1,0 +1,61 @@
+### Run `docker compose up -d --build` first. Sample data is seeded in Development.
+@base = http://localhost:8080
+@token = paste-access-token-here
+
+### Log in as the seeded admin (also: manager@demo.local, reception@demo.local)
+POST {{base}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "admin@demo.local", "password": "Passw0rd!" }
+
+### Sign up a new company (returns a token for its first Admin)
+POST {{base}}/api/auth/register
+Content-Type: application/json
+
+{ "companyName": "My Hotel Co", "fullName": "Jane Owner", "email": "jane@myhotel.example", "password": "Sup3rSecret!" }
+
+### Who am I
+GET {{base}}/api/auth/me
+Authorization: Bearer {{token}}
+
+### Hotels (paged, searchable)
+GET {{base}}/api/hotels?search=harbour&page=1&pageSize=20
+Authorization: Bearer {{token}}
+
+### Rooms (filters: hotelId, type, minCapacity, maxPrice, isActive)
+GET {{base}}/api/rooms?minCapacity=2&maxPrice=200
+Authorization: Bearer {{token}}
+
+### Availability
+GET {{base}}/api/rooms/available?hotelId=HOTEL_ID&checkIn=2026-12-01&checkOut=2026-12-04&guests=2
+Authorization: Bearer {{token}}
+
+### Guests
+GET {{base}}/api/guests?search=jensen
+Authorization: Bearer {{token}}
+
+### Create booking
+POST {{base}}/api/bookings
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "roomId": "ROOM_ID", "guestId": "GUEST_ID", "checkIn": "2026-12-01", "checkOut": "2026-12-04", "numberOfGuests": 2 }
+
+### Booking lifecycle
+POST {{base}}/api/bookings/BOOKING_ID/check-in
+Authorization: Bearer {{token}}
+
+### Record a payment (type: Payment | Refund; method: Cash | Card | BankTransfer | Other)
+POST {{base}}/api/bookings/BOOKING_ID/payments
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "amount": 100.00, "method": "Card", "reference": "Deposit" }
+
+### Invoice
+GET {{base}}/api/bookings/BOOKING_ID/invoice
+Authorization: Bearer {{token}}
+
+### Check out (balance must be settled)
+POST {{base}}/api/bookings/BOOKING_ID/check-out
+Authorization: Bearer {{token}}

@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/HotelManagement.Tests/HotelManagement.Tests.csproj" />
+    <Project Path="tests/HotelManagement.UnitTests/HotelManagement.UnitTests.csproj" />
+  </Folder>
+  <Project Path="Hotel management/Hotel management.csproj" />
+  <Project Path="HotelManagement.Application/HotelManagement.Application.csproj" />
+  <Project Path="HotelManagement.Domain/HotelManagement.Domain.csproj" />
+  <Project Path="HotelManagement.Infrastructure/HotelManagement.Infrastructure.csproj" />
+</Solution>

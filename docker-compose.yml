@@ -1,0 +1,37 @@
+name: hotel-management
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: hotel
+      POSTGRES_USER: hotel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hotel}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hotel -d hotel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Hotel management/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__Default: "Host=db;Port=5432;Database=hotel;Username=hotel;Password=${POSTGRES_PASSWORD:-hotel};GSS Encryption Mode=Disable"
+      Jwt__Key: ${JWT_KEY:-dev-only-signing-key-change-me-0123456789abcdef}
+      Database__SeedSampleData: ${SEED_SAMPLE_DATA:-true}
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
