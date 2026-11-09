@@ -1,5 +1,10 @@
 name: hotel-management
 
+# Development stack. For production, add the override (TLS via Caddy, no dev defaults):
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# The defaults below are PUBLIC development secrets; outside the Development environment
+# the API refuses to start with them.
+
 services:
   db:
     image: postgres:17-alpine
@@ -8,7 +13,7 @@ services:
       POSTGRES_USER: hotel
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hotel}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"   # reachable from this machine only, never from the network
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -17,6 +22,13 @@ services:
       timeout: 5s
       retries: 10
 
+  # Development mail catcher: every email the API sends shows up at http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports:
+      - "127.0.0.1:8025:8025"   # web UI
+      - "127.0.0.1:1025:1025"   # SMTP (used by the API when run from the IDE)
+
   api:
     build:
       context: .
@@ -24,12 +36,22 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_HTTP_PORTS: "8080"
       ConnectionStrings__Default: "Host=db;Port=5432;Database=hotel;Username=hotel;Password=${POSTGRES_PASSWORD:-hotel};GSS Encryption Mode=Disable"
       Jwt__Key: ${JWT_KEY:-dev-only-signing-key-change-me-0123456789abcdef}
+      Encryption__KeyId: ${ENCRYPTION_KEY_ID:-dev}
+      Encryption__Key: ${ENCRYPTION_KEY:-ZGV2LW9ubHktZW5jcnlwdGlvbi1rZXktMzJieXRlcyE=}
+      Encryption__BlindIndexKey: ${BLIND_INDEX_KEY:-ZGV2LW9ubHktYmxpbmQtaW5kZXgta2V5LTMyYnl0ZXM=}
       Database__SeedSampleData: ${SEED_SAMPLE_DATA:-true}
+      Email__Host: ${SMTP_HOST:-mailpit}
+      Email__Port: ${SMTP_PORT:-1025}
+      Email__Security: ${SMTP_SECURITY:-None}
+      Email__Username: ${SMTP_USERNAME:-}
+      Email__Password: ${SMTP_PASSWORD:-}
     ports:
       - "8080:8080"
 

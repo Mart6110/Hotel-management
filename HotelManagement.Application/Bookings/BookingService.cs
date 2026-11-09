@@ -1,12 +1,11 @@
 using HotelManagement.Application.Common;
 using HotelManagement.Application.Contracts;
 using HotelManagement.Application.Guests;
-using HotelManagement.Application.Rooms;
 using HotelManagement.Domain;
 
 namespace HotelManagement.Application.Bookings;
 
-/// <summary>Reservation lifecycle: create, check in, check out, cancel.</summary>
+/// <summary>Reservation lifecycle for staff: create, check in, check out, cancel.</summary>
 public interface IBookingService
 {
     Task<PagedResult<BookingResponse>> ListAsync(BookingQuery query, CancellationToken ct);
@@ -19,8 +18,8 @@ public interface IBookingService
 
 public class BookingService(
     IBookingRepository bookings,
-    IRoomRepository rooms,
     IGuestRepository guests,
+    IRoomReservation reservation,
     IBookingQueries queries,
     IUnitOfWork unitOfWork,
     TimeProvider clock) : IBookingService
@@ -37,18 +36,12 @@ public class BookingService(
         Guid bookingId;
         await using (var tx = await unitOfWork.BeginTransactionAsync(ct))
         {
-            // Serialize bookings per room so the overlap check below can't race.
-            // (The database's exclusion constraint remains the final guarantee.)
-            await rooms.LockForBookingAsync(r.RoomId, ct);
-
-            var room = (await rooms.GetByIdAsync(r.RoomId, ct)).OrThrow(r.RoomId);
             var guest = (await guests.GetByIdAsync(r.GuestId, ct)).OrThrow(r.GuestId);
-            var booking = Booking.Create(room, guest, r.CheckIn, r.CheckOut, r.NumberOfGuests, r.Notes, Now);
+            var booking = await reservation.TryReserveAsync(
+                    r.RoomId, guest, new ReservationRequest(r.CheckIn, r.CheckOut, r.NumberOfGuests, r.Notes),
+                    BookingSource.Staff, accessCodeHash: null, ct)
+                ?? throw DomainException.Conflict("The room is already booked for the selected dates.");
 
-            if (await bookings.HasOverlapAsync(room.Id, booking.CheckIn, booking.CheckOut, ct))
-                throw DomainException.Conflict("The room is already booked for the selected dates.");
-
-            bookings.Add(booking);
             await unitOfWork.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
             bookingId = booking.Id;

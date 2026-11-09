@@ -28,7 +28,7 @@ public class BookingCreationTests
     public void Rejects_invalid_requests(int inOffset, int outOffset, int guests)
     {
         var ex = Assert.Throws<DomainException>(() =>
-            Booking.Create(NewRoom(), NewGuest(), Today.AddDays(inOffset), Today.AddDays(outOffset), guests, null, Now));
+            Booking.Create(NewRoom(), NewGuest(), Today.AddDays(inOffset), Today.AddDays(outOffset), guests, null, Now, "BK-X"));
         Assert.Equal(ErrorKind.Validation, ex.Kind);
     }
 
@@ -36,7 +36,7 @@ public class BookingCreationTests
     public void Inactive_room_cannot_be_booked()
     {
         var ex = Assert.Throws<DomainException>(() =>
-            Booking.Create(NewRoom(isActive: false), NewGuest(), Today, Today.AddDays(1), 1, null, Now));
+            Booking.Create(NewRoom(isActive: false), NewGuest(), Today, Today.AddDays(1), 1, null, Now, "BK-X"));
         Assert.Equal(ErrorKind.Conflict, ex.Kind);
     }
 
@@ -47,7 +47,7 @@ public class BookingCreationTests
         foreignGuest.AssignCompany(Guid.NewGuid());
 
         var ex = Assert.Throws<DomainException>(() =>
-            Booking.Create(NewRoom(), foreignGuest, Today, Today.AddDays(1), 1, null, Now));
+            Booking.Create(NewRoom(), foreignGuest, Today, Today.AddDays(1), 1, null, Now, "BK-X"));
         Assert.Equal(ErrorKind.Validation, ex.Kind);
     }
 }

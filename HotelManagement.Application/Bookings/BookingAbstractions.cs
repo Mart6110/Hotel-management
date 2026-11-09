@@ -12,6 +12,12 @@ public interface IBookingRepository
     /// <summary>Loads the booking with room, hotel, guest and payments, read-only.</summary>
     Task<Booking?> GetWithDetailsAsync(Guid id, CancellationToken ct);
 
+    /// <summary>All of a guest's bookings with room, hotel and payments, tracked for changes.</summary>
+    Task<IReadOnlyList<Booking>> ListForGuestAsync(Guid guestId, CancellationToken ct);
+
+    /// <summary>Loads a booking by its reference with room, hotel and guest, tracked for changes.</summary>
+    Task<Booking?> FindByReferenceAsync(string reference, CancellationToken ct);
+
     /// <summary>Whether an active booking for the room overlaps [checkIn, checkOut).</summary>
     Task<bool> HasOverlapAsync(Guid roomId, DateOnly checkIn, DateOnly checkOut, CancellationToken ct);
 

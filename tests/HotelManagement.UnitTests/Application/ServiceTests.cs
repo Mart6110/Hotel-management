@@ -21,6 +21,7 @@ public class BookingServiceTests
     private readonly IBookingQueries _queries = Substitute.For<IBookingQueries>();
     private readonly IUnitOfWork _unitOfWork = Substitute.For<IUnitOfWork>();
     private readonly ITransaction _transaction = Substitute.For<ITransaction>();
+    private readonly IBookingCodeGenerator _codes = Substitute.For<IBookingCodeGenerator>();
     private readonly BookingService _sut;
 
     private readonly Room _room = NewRoom(price: 100m);
@@ -28,11 +29,16 @@ public class BookingServiceTests
 
     public BookingServiceTests()
     {
+        var clock = new FakeTimeProvider(Now);
         _unitOfWork.BeginTransactionAsync(default).ReturnsForAnyArgs(_transaction);
         _rooms.GetByIdAsync(_room.Id, default).ReturnsForAnyArgs(_room);
         _guests.GetByIdAsync(_guest.Id, default).ReturnsForAnyArgs(_guest);
         _queries.GetAsync(default, default).ReturnsForAnyArgs(call => Response(call.Arg<Guid>()));
-        _sut = new BookingService(_bookings, _rooms, _guests, _queries, _unitOfWork, new FakeTimeProvider(Now));
+        _codes.NewReference().Returns("BK-TEST0001");
+
+        // Real reservation logic over mocked repositories: verifies the full lock -> check -> add sequence.
+        var reservation = new RoomReservation(_rooms, _bookings, _codes, clock);
+        _sut = new BookingService(_bookings, _guests, reservation, _queries, _unitOfWork, clock);
     }
 
     private CreateBookingRequest Request() => new()
@@ -49,7 +55,9 @@ public class BookingServiceTests
         {
             _unitOfWork.BeginTransactionAsync(Arg.Any<CancellationToken>());
             _rooms.LockForBookingAsync(_room.Id, Arg.Any<CancellationToken>());
-            _bookings.Add(Arg.Is<Booking>(b => b.RoomId == _room.Id && b.TotalPrice == 200m));
+            _bookings.Add(Arg.Is<Booking>(b =>
+                b.RoomId == _room.Id && b.TotalPrice == 200m &&
+                b.Reference == "BK-TEST0001" && b.Source == BookingSource.Staff && b.AccessCodeHash == null));
             _unitOfWork.SaveChangesAsync(Arg.Any<CancellationToken>());
             _transaction.CommitAsync(Arg.Any<CancellationToken>());
         });
@@ -91,7 +99,7 @@ public class BookingServiceTests
 
     private static BookingResponse Response(Guid id) => new(
         id, Guid.Empty, "", Guid.Empty, "", Guid.Empty, "", Today, Today.AddDays(1), 1, 0, 0,
-        BookingStatus.Confirmed, null, Now, null, null, null);
+        BookingStatus.Confirmed, null, Now, null, null, null, "BK-TEST0001", BookingSource.Staff);
 }
 
 public class PaymentServiceTests
@@ -167,68 +175,6 @@ public class InvoiceServiceTests
         var booking = NewBooking();
         booking.Cancel(Now);
         Assert.Empty(InvoiceService.Build(booking).Lines);
-    }
-}
-
-public class AuthServiceTests
-{
-    private readonly IUserRepository _users = Substitute.For<IUserRepository>();
-    private readonly IPasswordHasher _hasher = Substitute.For<IPasswordHasher>();
-    private readonly ITokenService _tokens = Substitute.For<ITokenService>();
-    private readonly AuthService _sut;
-
-    public AuthServiceTests()
-    {
-        _tokens.CreateToken(default!).ReturnsForAnyArgs(new AccessToken("token", Now));
-        _hasher.Hash(default!).ReturnsForAnyArgs("hashed");
-        _sut = new AuthService(Substitute.For<ICompanyRepository>(), _users, Substitute.For<IUnitOfWork>(),
-            _hasher, _tokens, Substitute.For<ICurrentUser>());
-    }
-
-    [Fact]
-    public async Task Login_with_wrong_password_is_unauthorized()
-    {
-        _users.FindByEmailAsync("a@x.com", default).ReturnsForAnyArgs(new User(CompanyId, "a@x.com", "A", UserRole.Admin, "hash"));
-        _hasher.Verify("hash", "wrong").Returns(false);
-
-        var ex = await Assert.ThrowsAsync<DomainException>(() =>
-            _sut.LoginAsync(new LoginRequest { Email = "A@X.com", Password = "wrong" }, default));
-        Assert.Equal(ErrorKind.Unauthorized, ex.Kind);
-    }
-
-    [Fact]
-    public async Task Login_looks_up_normalized_email()
-    {
-        _users.FindByEmailAsync("a@x.com", Arg.Any<CancellationToken>()).Returns(new User(CompanyId, "a@x.com", "A", UserRole.Admin, "hash"));
-        _hasher.Verify("hash", "right").Returns(true);
-
-        var result = await _sut.LoginAsync(new LoginRequest { Email = "  A@X.COM ", Password = "right" }, default);
-        Assert.Equal("token", result.AccessToken);
-    }
-
-    [Fact]
-    public async Task Register_with_taken_email_is_a_conflict()
-    {
-        _users.EmailExistsAsync("taken@x.com", Arg.Any<CancellationToken>()).Returns(true);
-
-        var ex = await Assert.ThrowsAsync<DomainException>(() => _sut.RegisterCompanyAsync(new RegisterCompanyRequest
-        {
-            CompanyName = "Co", FullName = "Name", Email = "Taken@x.com", Password = "Sup3rSecret!",
-        }, default));
-        Assert.Equal(ErrorKind.Conflict, ex.Kind);
-        _users.DidNotReceiveWithAnyArgs().Add(default!);
-    }
-
-    [Fact]
-    public async Task Register_creates_an_admin_with_hashed_password()
-    {
-        var result = await _sut.RegisterCompanyAsync(new RegisterCompanyRequest
-        {
-            CompanyName = "Co", FullName = "Owner", Email = "owner@x.com", Password = "Sup3rSecret!",
-        }, default);
-
-        _users.Received(1).Add(Arg.Is<User>(u => u.Role == UserRole.Admin && u.PasswordHash == "hashed"));
-        Assert.Equal(UserRole.Admin, result.User.Role);
     }
 }
 

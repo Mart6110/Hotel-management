@@ -8,6 +8,15 @@ public enum BookingStatus
     Cancelled
 }
 
+public enum BookingSource
+{
+    /// <summary>Entered by hotel staff.</summary>
+    Staff,
+
+    /// <summary>Made by the guest through the public booking API.</summary>
+    Online
+}
+
 /// <summary>
 /// A guest's reservation of a room. Aggregate root for its payments: all lifecycle
 /// and money rules live here. Balance-related members require <see cref="Payments"/> to be loaded.
@@ -19,6 +28,13 @@ public class Booking : TenantEntity
     private readonly List<Payment> _payments = [];
 
     private Booking() { }
+
+    /// <summary>Human-friendly unique booking reference, e.g. "BK-7K3P9QXM".</summary>
+    public string Reference { get; private set; } = "";
+    public BookingSource Source { get; private set; }
+
+    /// <summary>Hash of the secret code an online guest uses to view or cancel the booking.</summary>
+    public string? AccessCodeHash { get; private set; }
 
     public Guid RoomId { get; private set; }
     public Room Room { get; private set; } = null!;
@@ -57,24 +73,25 @@ public class Booking : TenantEntity
     public decimal Balance => AmountDue - TotalPaid + TotalRefunded;
 
     public static Booking Create(
-        Room room, Guest guest, DateOnly checkIn, DateOnly checkOut, int numberOfGuests, string? notes, DateTime now)
+        Room room, Guest guest, DateOnly checkIn, DateOnly checkOut, int numberOfGuests, string? notes, DateTime now,
+        string reference, BookingSource source = BookingSource.Staff, string? accessCodeHash = null)
     {
         ArgumentNullException.ThrowIfNull(room);
         ArgumentNullException.ThrowIfNull(guest);
+        if (source == BookingSource.Online && string.IsNullOrEmpty(accessCodeHash))
+            throw new ArgumentException("Online bookings need an access code.", nameof(accessCodeHash));
 
-        if (checkOut <= checkIn)
-            throw DomainException.Validation("CheckOut must be after CheckIn.");
-        if (checkIn < DateOnly.FromDateTime(now))
-            throw DomainException.Validation("CheckIn cannot be in the past.");
+        ValidateStay(checkIn, checkOut, now);
         var nights = checkOut.DayNumber - checkIn.DayNumber;
-        if (nights > MaxNights)
-            throw DomainException.Validation($"A booking cannot exceed {MaxNights} nights.");
         if (room.CompanyId != guest.CompanyId)
             throw DomainException.Validation("Room and guest must belong to the same company.");
         room.EnsureCanHost(numberOfGuests);
 
         var booking = new Booking
         {
+            Reference = Guard.Required(reference, "Reference", 20),
+            Source = source,
+            AccessCodeHash = accessCodeHash,
             RoomId = room.Id,
             Room = room,
             GuestId = guest.Id,
@@ -89,6 +106,17 @@ public class Booking : TenantEntity
         };
         booking.InheritCompany(room);
         return booking;
+    }
+
+    /// <summary>Throws unless [checkIn, checkOut) is a bookable stay as of <paramref name="now"/>.</summary>
+    public static void ValidateStay(DateOnly checkIn, DateOnly checkOut, DateTime now)
+    {
+        if (checkOut <= checkIn)
+            throw DomainException.Validation("CheckOut must be after CheckIn.");
+        if (checkIn < DateOnly.FromDateTime(now))
+            throw DomainException.Validation("CheckIn cannot be in the past.");
+        if (checkOut.DayNumber - checkIn.DayNumber > MaxNights)
+            throw DomainException.Validation($"A booking cannot exceed {MaxNights} nights.");
     }
 
     public void MarkCheckedIn(DateTime now)
@@ -120,6 +148,24 @@ public class Booking : TenantEntity
         Status = BookingStatus.Cancelled;
         CancelledAt = now;
     }
+
+    /// <summary>Latest moment (UTC) a guest may cancel online: <paramref name="cutoff"/> before the start of the arrival day.</summary>
+    public DateTime GuestCancellationDeadline(TimeSpan cutoff) =>
+        CheckIn.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc) - cutoff;
+
+    /// <summary>Cancellation by the guest themselves, allowed only until the cancellation deadline.</summary>
+    public void CancelByGuest(DateTime now, TimeSpan cutoff)
+    {
+        EnsureStatus(BookingStatus.Confirmed, "cancelled");
+        var deadline = GuestCancellationDeadline(cutoff);
+        if (now > deadline)
+            throw DomainException.Conflict(
+                $"Online cancellation closed at {deadline.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)} UTC. Please contact the hotel.");
+        Cancel(now);
+    }
+
+    /// <summary>Free-text notes may contain personal data; removed when the guest is anonymized.</summary>
+    public void RedactNotes() => Notes = null;
 
     public Payment RecordPayment(decimal amount, PaymentMethod method, string? reference, DateTime now, Guid? recordedBy)
     {

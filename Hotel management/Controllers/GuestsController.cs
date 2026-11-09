@@ -9,8 +9,21 @@ namespace HotelManagement.Api.Controllers;
 
 [ApiController]
 [Route("api/guests")]
-public class GuestsController(IGuestService guests) : ControllerBase
+public class GuestsController(IGuestService guests, IGuestPrivacyService privacy) : ControllerBase
 {
+    /// <summary>GDPR right of access: everything held about the guest, including bookings and payments.</summary>
+    [HttpGet("{id:guid}/export")]
+    [Authorize(Roles = Roles.AdminOrManager)]
+    public Task<GuestDataExport> Export(Guid id, CancellationToken ct) => privacy.ExportAsync(id, ct);
+
+    /// <summary>
+    /// GDPR right to erasure: irreversibly removes the guest's name, email, phone and booking notes.
+    /// Bookings and payments are kept (anonymized) for accounting. Not allowed while a stay is upcoming or ongoing.
+    /// </summary>
+    [HttpPost("{id:guid}/anonymize")]
+    [Authorize(Roles = Roles.AdminOrManager)]
+    public Task<GuestResponse> Anonymize(Guid id, CancellationToken ct) => privacy.AnonymizeAsync(id, ct);
+
     [HttpGet]
     public Task<PagedResult<GuestResponse>> List([FromQuery] GuestQuery query, CancellationToken ct) => guests.ListAsync(query, ct);
 

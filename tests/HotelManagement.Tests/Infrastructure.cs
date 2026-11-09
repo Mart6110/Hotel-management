@@ -1,13 +1,18 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using HotelManagement.Application.Common;
 using HotelManagement.Application.Contracts;
 using HotelManagement.Domain;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Testcontainers.PostgreSql;
 
 namespace HotelManagement.Tests;
@@ -17,6 +22,12 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:17-alpine").Build();
 
+    /// <summary>Direct database access, for asserting what is actually stored.</summary>
+    public string ConnectionString => _db.GetConnectionString();
+
+    /// <summary>Every email the API "sends" during tests.</summary>
+    public CapturingEmailSender Emails { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
@@ -25,7 +36,16 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             ["ConnectionStrings:Default"] = _db.GetConnectionString() + ";GSS Encryption Mode=Disable",
             ["Database:SeedSampleData"] = "false",
             ["Jwt:Key"] = "integration-test-signing-key-0123456789abcdef",
+            // All test requests share one client IP, so lift the per-IP limits (a dedicated test lowers them again).
+            ["RateLimiting:PublicPerMinute"] = "100000",
+            ["RateLimiting:PublicWritePerMinute"] = "100000",
+            ["RateLimiting:AuthPerMinute"] = "100000",
         }));
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IEmailSender>();
+            services.AddSingleton<IEmailSender>(Emails);
+        });
     }
 
     public Task InitializeAsync() => _db.StartAsync();
@@ -35,6 +55,22 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         await base.DisposeAsync();
         await _db.DisposeAsync();
     }
+}
+
+public class CapturingEmailSender : IEmailSender
+{
+    private readonly ConcurrentQueue<EmailMessage> _sent = new();
+
+    public IReadOnlyList<EmailMessage> Sent => _sent.ToArray();
+
+    public Task SendAsync(EmailMessage message, CancellationToken ct)
+    {
+        _sent.Enqueue(message);
+        return Task.CompletedTask;
+    }
+
+    public IReadOnlyList<EmailMessage> To(string address) =>
+        Sent.Where(m => m.To.Equals(address, StringComparison.OrdinalIgnoreCase)).ToList();
 }
 
 [CollectionDefinition(Name)]
@@ -52,6 +88,8 @@ public abstract class ApiTestBase(ApiFactory factory)
     };
 
     protected static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
+
+    protected ApiFactory Factory => factory;
 
     protected HttpClient Anonymous() => factory.CreateClient();
 

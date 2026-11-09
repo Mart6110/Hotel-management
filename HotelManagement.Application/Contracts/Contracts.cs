@@ -11,7 +11,23 @@ public record RegisterCompanyRequest
     [Required, MaxLength(200)] public string CompanyName { get; init; } = "";
     [Required, MaxLength(200)] public string FullName { get; init; } = "";
     [Required, EmailAddress, MaxLength(256)] public string Email { get; init; } = "";
-    [Required, MinLength(8), MaxLength(128)] public string Password { get; init; } = "";
+    [Required, MinLength(10), MaxLength(128)] public string Password { get; init; } = "";
+
+    /// <summary>Optional URL slug for the public booking API; generated from the company name if omitted.</summary>
+    [MaxLength(60)] public string? CompanySlug { get; init; }
+}
+
+public record CompanyResponse(Guid Id, string Name, string Slug, DateTime CreatedAt)
+{
+    public static CompanyResponse From(Company c) => new(c.Id, c.Name, c.Slug, c.CreatedAt);
+}
+
+public record UpdateCompanyRequest
+{
+    [Required, MaxLength(200)] public string Name { get; init; } = "";
+
+    /// <summary>Lowercase letters, digits and hyphens. Changing it changes your public booking URLs.</summary>
+    [Required, MinLength(3), MaxLength(60)] public string Slug { get; init; } = "";
 }
 
 public record LoginRequest
@@ -25,13 +41,19 @@ public record UserResponse(Guid Id, Guid CompanyId, string Email, string FullNam
     public static UserResponse From(User u) => new(u.Id, u.CompanyId, u.Email, u.FullName, u.Role, u.IsActive, u.CreatedAt);
 }
 
-public record AuthResponse(string AccessToken, DateTime ExpiresAt, UserResponse User);
+/// <summary>A login session: a short-lived access token plus a single-use refresh token to get the next one.</summary>
+public record AuthResponse(string AccessToken, DateTime ExpiresAt, string RefreshToken, DateTime RefreshTokenExpiresAt, UserResponse User);
+
+public record RefreshTokenRequest
+{
+    [Required, MaxLength(200)] public string RefreshToken { get; init; } = "";
+}
 
 public record CreateUserRequest
 {
     [Required, MaxLength(200)] public string FullName { get; init; } = "";
     [Required, EmailAddress, MaxLength(256)] public string Email { get; init; } = "";
-    [Required, MinLength(8), MaxLength(128)] public string Password { get; init; } = "";
+    [Required, MinLength(10), MaxLength(128)] public string Password { get; init; } = "";
     [Required, EnumDataType(typeof(UserRole))] public UserRole Role { get; init; }
 }
 
@@ -112,9 +134,9 @@ public record GuestRequest
     [MaxLength(50)] public string? Phone { get; init; }
 }
 
-public record GuestResponse(Guid Id, string FirstName, string LastName, string? Email, string? Phone, DateTime CreatedAt)
+public record GuestResponse(Guid Id, string FirstName, string LastName, string? Email, string? Phone, DateTime CreatedAt, bool IsAnonymized = false)
 {
-    public static GuestResponse From(Guest g) => new(g.Id, g.FirstName, g.LastName, g.Email, g.Phone, g.CreatedAt);
+    public static GuestResponse From(Guest g) => new(g.Id, g.FirstName, g.LastName, g.Email, g.Phone, g.CreatedAt, g.IsAnonymized);
 }
 
 public class GuestQuery : PageQuery
@@ -153,7 +175,9 @@ public record BookingResponse(
     DateTime CreatedAt,
     DateTime? CheckedInAt,
     DateTime? CheckedOutAt,
-    DateTime? CancelledAt)
+    DateTime? CancelledAt,
+    string Reference,
+    BookingSource Source)
 {
     public int Nights => CheckOut.DayNumber - CheckIn.DayNumber;
 }
@@ -164,6 +188,10 @@ public class BookingQuery : PageQuery
     public Guid? RoomId { get; set; }
     public Guid? GuestId { get; set; }
     public BookingStatus? Status { get; set; }
+    public BookingSource? Source { get; set; }
+
+    /// <summary>Exact booking reference, e.g. BK-7K3P9QXM (case-insensitive).</summary>
+    public string? Reference { get; set; }
 
     /// <summary>Only bookings whose stay overlaps [From, To).</summary>
     public DateOnly? From { get; set; }

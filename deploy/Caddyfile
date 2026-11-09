@@ -1,0 +1,12 @@
+# TLS-terminating reverse proxy for the API (used by docker-compose.prod.yml).
+# Caddy obtains and renews certificates automatically for {$DOMAIN}
+# (a locally trusted self-signed one when DOMAIN=localhost), redirects HTTP to HTTPS,
+# and forwards X-Forwarded-For / X-Forwarded-Proto to the API.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy api:8080
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+}

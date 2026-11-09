@@ -1,14 +1,20 @@
 using System.Reflection;
 using HotelManagement.Application.Common;
 using HotelManagement.Domain;
+using HotelManagement.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 
 namespace HotelManagement.Infrastructure.Persistence;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options, ICurrentUser currentUser) : DbContext(options)
+public class AppDbContext(
+    DbContextOptions<AppDbContext> options,
+    ITenantContext tenant,
+    IFieldEncryptor encryptor,
+    IBlindIndex blindIndex) : DbContext(options)
 {
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Hotel> Hotels => Set<Hotel>();
     public DbSet<Room> Rooms => Set<Room>();
     public DbSet<Guest> Guests => Set<Guest>();
@@ -16,16 +22,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ICurrentUser c
     public DbSet<Payment> Payments => Set<Payment>();
 
     /// <summary>
-    /// The caller's company. Tenant query filters compare against this, so every query
-    /// only sees the current company's rows. With no tenant (anonymous), filters match nothing.
+    /// The current tenant (the signed-in user's company, or the company selected by a public request).
+    /// Tenant query filters compare against this, so every query only sees the current company's rows.
+    /// With no tenant (anonymous), filters match nothing.
     /// </summary>
-    private Guid? CurrentCompanyId => currentUser.CompanyId;
+    private Guid? CurrentCompanyId => tenant.CompanyId;
+
+    /// <summary>Computes the blind index for a value, for queries against blind-index columns.</summary>
+    internal string BlindIndexOf(string value) => blindIndex.Compute(value);
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Needed for the booking exclusion constraint (see InitialCreate migration).
         modelBuilder.HasPostgresExtension("btree_gist");
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+
+        // Personal data marked with .IsEncrypted() in the mappings is encrypted at rest.
+        modelBuilder.ApplyEncryption(encryptor);
 
         foreach (var entityType in modelBuilder.Model.GetEntityTypes().ToList())
         {
@@ -47,20 +60,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ICurrentUser c
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken ct = default)
     {
-        StampTenant();
+        BeforeSave();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, ct);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
-        StampTenant();
+        BeforeSave();
         return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    private void BeforeSave()
+    {
+        ChangeTracker.DetectChanges();
+        StampTenant();
+        ChangeTracker.UpdateBlindIndexes(blindIndex);
     }
 
     /// <summary>New tenant rows get the caller's company; changing a row's company is never allowed.</summary>
     private void StampTenant()
     {
-        ChangeTracker.DetectChanges();
         foreach (var entry in ChangeTracker.Entries<ITenantEntity>())
         {
             if (entry.State == EntityState.Added && entry.Entity.CompanyId == Guid.Empty)

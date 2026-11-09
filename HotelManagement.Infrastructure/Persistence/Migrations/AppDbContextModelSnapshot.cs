@@ -26,8 +26,11 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("HotelManagement.Domain.Booking", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<string>("AccessCodeHash")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<DateTime?>("CancelledAt")
                         .HasColumnType("timestamp with time zone");
@@ -54,8 +57,8 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("Notes")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
+                        .HasColumnType("text")
+                        .HasAnnotation("HotelManagement:Encrypted", true);
 
                     b.Property<int>("NumberOfGuests")
                         .HasColumnType("integer");
@@ -64,8 +67,18 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
                         .HasPrecision(10, 2)
                         .HasColumnType("numeric(10,2)");
 
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<Guid>("RoomId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -86,6 +99,9 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("GuestId");
 
+                    b.HasIndex("Reference")
+                        .IsUnique();
+
                     b.HasIndex("RoomId");
 
                     b.HasIndex("CompanyId", "CheckIn");
@@ -96,7 +112,6 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("HotelManagement.Domain.Company", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
@@ -107,7 +122,15 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("Slug")
+                        .IsUnique();
 
                     b.ToTable("Companies");
                 });
@@ -115,8 +138,10 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("HotelManagement.Domain.Guest", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("AnonymizedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("uuid");
@@ -125,26 +150,31 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Email")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
+                        .HasColumnType("text")
+                        .HasAnnotation("HotelManagement:Encrypted", true);
+
+                    b.Property<string>("EmailIndex")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasAnnotation("HotelManagement:BlindIndexSource", "Email");
 
                     b.Property<string>("FirstName")
                         .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
+                        .HasColumnType("text")
+                        .HasAnnotation("HotelManagement:Encrypted", true);
 
                     b.Property<string>("LastName")
                         .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
+                        .HasColumnType("text")
+                        .HasAnnotation("HotelManagement:Encrypted", true);
 
                     b.Property<string>("Phone")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
+                        .HasColumnType("text")
+                        .HasAnnotation("HotelManagement:Encrypted", true);
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CompanyId", "Email")
+                    b.HasIndex("CompanyId", "EmailIndex")
                         .IsUnique();
 
                     b.ToTable("Guests");
@@ -153,7 +183,6 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("HotelManagement.Domain.Hotel", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("Address")
@@ -200,7 +229,6 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("HotelManagement.Domain.Payment", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<decimal>("Amount")
@@ -240,10 +268,56 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
                     b.ToTable("Payments");
                 });
 
+            modelBuilder.Entity("HotelManagement.Domain.RefreshToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("FamilyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ReplacedByTokenId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RevocationReason")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FamilyId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("RefreshTokens");
+                });
+
             modelBuilder.Entity("HotelManagement.Domain.Room", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<int>("Capacity")
@@ -288,7 +362,6 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("HotelManagement.Domain.User", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("CompanyId")
@@ -302,6 +375,9 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<int>("FailedLoginCount")
+                        .HasColumnType("integer");
+
                     b.Property<string>("FullName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -309,6 +385,9 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LockoutEndsAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
@@ -318,6 +397,11 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
+
+                    b.Property<string>("SecurityStamp")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.HasKey("Id");
 
@@ -368,19 +452,26 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("HotelManagement.Domain.Payment", b =>
                 {
-                    b.HasOne("HotelManagement.Domain.Booking", "Booking")
+                    b.HasOne("HotelManagement.Domain.Booking", null)
                         .WithMany("Payments")
                         .HasForeignKey("BookingId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
 
-                    b.Navigation("Booking");
+            modelBuilder.Entity("HotelManagement.Domain.RefreshToken", b =>
+                {
+                    b.HasOne("HotelManagement.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("HotelManagement.Domain.Room", b =>
                 {
                     b.HasOne("HotelManagement.Domain.Hotel", "Hotel")
-                        .WithMany("Rooms")
+                        .WithMany()
                         .HasForeignKey("HotelId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
@@ -390,23 +481,16 @@ namespace HotelManagement.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("HotelManagement.Domain.User", b =>
                 {
-                    b.HasOne("HotelManagement.Domain.Company", "Company")
+                    b.HasOne("HotelManagement.Domain.Company", null)
                         .WithMany()
                         .HasForeignKey("CompanyId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("Company");
                 });
 
             modelBuilder.Entity("HotelManagement.Domain.Booking", b =>
                 {
                     b.Navigation("Payments");
-                });
-
-            modelBuilder.Entity("HotelManagement.Domain.Hotel", b =>
-                {
-                    b.Navigation("Rooms");
                 });
 #pragma warning restore 612, 618
         }

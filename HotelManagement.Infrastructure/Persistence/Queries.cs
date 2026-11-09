@@ -4,6 +4,7 @@ using HotelManagement.Application.Common;
 using HotelManagement.Application.Contracts;
 using HotelManagement.Application.Guests;
 using HotelManagement.Application.Hotels;
+using HotelManagement.Application.PublicBooking;
 using HotelManagement.Application.Rooms;
 using HotelManagement.Application.Users;
 using HotelManagement.Domain;
@@ -31,6 +32,18 @@ internal static class PagingExtensions
         var items = await query.Skip((page.Page - 1) * page.PageSize).Take(page.PageSize).ToListAsync(ct);
         return new PagedResult<T>(items, page.Page, page.PageSize, total);
     }
+
+    /// <summary>Pages first, then projects: needed when the projection has client-side parts.</summary>
+    public static async Task<PagedResult<TResult>> ToPagedAsync<TSource, TResult>(
+        this IQueryable<TSource> query, PageQuery page, Expression<Func<TSource, TResult>> selector, CancellationToken ct)
+    {
+        var total = await query.CountAsync(ct);
+        var items = await query.Skip((page.Page - 1) * page.PageSize).Take(page.PageSize).Select(selector).ToListAsync(ct);
+        return new PagedResult<TResult>(items, page.Page, page.PageSize, total);
+    }
+
+    public static PagedResult<T> ToPaged<T>(this IReadOnlyCollection<T> items, PageQuery page) =>
+        new(items.Skip((page.Page - 1) * page.PageSize).Take(page.PageSize).ToList(), page.Page, page.PageSize, items.Count);
 
     public static string ContainsPattern(this string search) => $"%{search.Trim()}%";
 }
@@ -122,34 +135,61 @@ internal class RoomQueries(AppDbContext db) : IRoomQueries
 
 internal class GuestQueries(AppDbContext db) : IGuestQueries
 {
-    public Task<PagedResult<GuestResponse>> ListAsync(GuestQuery q, CancellationToken ct)
+    /// <summary>
+    /// Guest personal data is encrypted with random nonces, so the database can't search or sort it.
+    /// The company's guests are decrypted and filtered in memory instead: fine for thousands of guests
+    /// per company; a dedicated search index would be the next step beyond that.
+    /// </summary>
+    public async Task<PagedResult<GuestResponse>> ListAsync(GuestQuery q, CancellationToken ct)
     {
-        var query = db.Guests.AsNoTracking();
+        IEnumerable<Guest> guests = await db.Guests.AsNoTracking().ToListAsync(ct);
+
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            var pattern = q.Search.ContainsPattern();
-            query = query.Where(g =>
-                EF.Functions.ILike(g.FirstName, pattern) ||
-                EF.Functions.ILike(g.LastName, pattern) ||
-                EF.Functions.ILike(g.FirstName + " " + g.LastName, pattern) ||
-                (g.Email != null && EF.Functions.ILike(g.Email, pattern)) ||
-                (g.Phone != null && EF.Functions.ILike(g.Phone, pattern)));
+            var term = q.Search.Trim();
+            bool Has(string? value) => value?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
+            guests = guests.Where(g => Has(g.FirstName) || Has(g.LastName) || Has(g.FullName) || Has(g.Email) || Has(g.Phone));
         }
 
-        return query
-            .OrderBy(g => g.LastName).ThenBy(g => g.FirstName).ThenBy(g => g.Id)
-            .Select(g => new GuestResponse(g.Id, g.FirstName, g.LastName, g.Email, g.Phone, g.CreatedAt))
-            .ToPagedAsync(q, ct);
+        return guests
+            .OrderBy(g => g.LastName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(g => g.FirstName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(g => g.Id)
+            .Select(GuestResponse.From)
+            .ToList()
+            .ToPaged(q);
+    }
+}
+
+internal class PublicCatalogQueries(AppDbContext db) : IPublicCatalogQueries
+{
+    public Task<PagedResult<PublicHotelResponse>> ListHotelsAsync(PageQuery page, CancellationToken ct) =>
+        db.Hotels.AsNoTracking()
+            .OrderBy(h => h.Name).ThenBy(h => h.Id)
+            .Select(h => new PublicHotelResponse(h.Id, h.Name, h.Address, h.City, h.Country, h.Phone, h.Email))
+            .ToPagedAsync(page, ct);
+
+    public async Task<IReadOnlyList<RoomTypeAvailability>> GetAvailabilityAsync(
+        Guid hotelId, DateOnly checkIn, DateOnly checkOut, int guests, CancellationToken ct)
+    {
+        var blocking = db.Bookings.Where(BookingPredicates.ActiveDuring(checkIn, checkOut));
+        return await db.Rooms.AsNoTracking()
+            .Where(r => r.HotelId == hotelId && r.IsActive && r.Capacity >= guests && !blocking.Any(b => b.RoomId == r.Id))
+            .GroupBy(r => r.Type)
+            .Select(g => new RoomTypeAvailability(g.Key, g.Max(r => r.Capacity), g.Count(), g.Min(r => r.PricePerNight)))
+            .ToListAsync(ct);
     }
 }
 
 internal class BookingQueries(AppDbContext db) : IBookingQueries
 {
+    // Guest names are encrypted columns: SQL can't concatenate them, so they're fetched separately,
+    // decrypted by EF's value converters, and joined client-side in the (final) projection.
     private static readonly Expression<Func<Booking, BookingResponse>> ToResponse = b => new BookingResponse(
         b.Id, b.Room.HotelId, b.Room.Hotel.Name, b.RoomId, b.Room.Number,
-        b.GuestId, b.Guest.FirstName + " " + b.Guest.LastName,
+        b.GuestId, JoinName(b.Guest.FirstName, b.Guest.LastName),
         b.CheckIn, b.CheckOut, b.NumberOfGuests, b.PricePerNight, b.TotalPrice, b.Status, b.Notes,
-        b.CreatedAt, b.CheckedInAt, b.CheckedOutAt, b.CancelledAt);
+        b.CreatedAt, b.CheckedInAt, b.CheckedOutAt, b.CancelledAt, b.Reference, b.Source);
 
     public Task<PagedResult<BookingResponse>> ListAsync(BookingQuery q, CancellationToken ct)
     {
@@ -158,15 +198,22 @@ internal class BookingQueries(AppDbContext db) : IBookingQueries
         if (q.RoomId is { } roomId) query = query.Where(b => b.RoomId == roomId);
         if (q.GuestId is { } guestId) query = query.Where(b => b.GuestId == guestId);
         if (q.Status is { } status) query = query.Where(b => b.Status == status);
+        if (q.Source is { } source) query = query.Where(b => b.Source == source);
+        if (!string.IsNullOrWhiteSpace(q.Reference))
+        {
+            var reference = q.Reference.Trim().ToUpperInvariant();
+            query = query.Where(b => b.Reference == reference);
+        }
         if (q.From is { } from) query = query.Where(b => b.CheckOut > from);
         if (q.To is { } to) query = query.Where(b => b.CheckIn < to);
 
         return query
             .OrderByDescending(b => b.CheckIn).ThenBy(b => b.Id)
-            .Select(ToResponse)
-            .ToPagedAsync(q, ct);
+            .ToPagedAsync(q, ToResponse, ct);
     }
 
     public Task<BookingResponse?> GetAsync(Guid id, CancellationToken ct) =>
         db.Bookings.AsNoTracking().Where(b => b.Id == id).Select(ToResponse).FirstOrDefaultAsync(ct);
+
+    private static string JoinName(string first, string last) => $"{first} {last}";
 }

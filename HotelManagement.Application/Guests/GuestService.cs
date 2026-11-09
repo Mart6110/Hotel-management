@@ -7,6 +7,7 @@ namespace HotelManagement.Application.Guests;
 public interface IGuestRepository
 {
     Task<Guest?> GetByIdAsync(Guid id, CancellationToken ct);
+    Task<Guest?> FindByEmailAsync(string normalizedEmail, CancellationToken ct);
     Task<bool> HasBookingsAsync(Guid guestId, CancellationToken ct);
     void Add(Guest guest);
     void Remove(Guest guest);

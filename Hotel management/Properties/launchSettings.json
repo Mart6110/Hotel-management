@@ -26,7 +26,8 @@
       "environmentVariables": {
         "ASPNETCORE_HTTPS_PORTS": "8081",
         "ASPNETCORE_HTTP_PORTS": "8080",
-        "ConnectionStrings__Default": "Host=host.docker.internal;Port=5433;Database=hotel;Username=hotel;Password=hotel;GSS Encryption Mode=Disable"
+        "ConnectionStrings__Default": "Host=host.docker.internal;Port=5433;Database=hotel;Username=hotel;Password=hotel;GSS Encryption Mode=Disable",
+        "Email__Host": "host.docker.internal"
       },
       "publishAllPorts": true,
       "useSSL": true

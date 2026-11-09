@@ -16,6 +16,10 @@ public interface IRoomRepository
     /// </summary>
     Task LockForBookingAsync(Guid roomId, CancellationToken ct);
 
+    /// <summary>IDs of active rooms of a type that fit the party and are free for the stay, cheapest first.</summary>
+    Task<IReadOnlyList<Guid>> FindFreeRoomIdsAsync(
+        Guid hotelId, RoomType type, DateOnly checkIn, DateOnly checkOut, int guests, CancellationToken ct);
+
     void Add(Room room);
     void Remove(Room room);
 }

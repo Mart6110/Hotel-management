@@ -27,5 +27,5 @@ internal static class TestData
 
     /// <summary>A confirmed booking from today+<paramref name="startOffset"/> for <paramref name="nights"/> nights.</summary>
     public static Booking NewBooking(decimal price = 100m, int startOffset = 0, int nights = 2) =>
-        global::HotelManagement.Domain.Booking.Create(NewRoom(price), NewGuest(), Today.AddDays(startOffset), Today.AddDays(startOffset + nights), 1, null, Now);
+        global::HotelManagement.Domain.Booking.Create(NewRoom(price), NewGuest(), Today.AddDays(startOffset), Today.AddDays(startOffset + nights), 1, null, Now, "BK-TEST0001");
 }

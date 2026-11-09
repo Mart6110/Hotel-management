@@ -59,3 +59,49 @@ Authorization: Bearer {{token}}
 ### Check out (balance must be settled)
 POST {{base}}/api/bookings/BOOKING_ID/check-out
 Authorization: Bearer {{token}}
+
+### ===== Public guest booking (no login) =====
+@slug = demo-hotels-group
+
+### Hotels of a company
+GET {{base}}/api/public/{{slug}}/hotels
+
+### Available room types for a stay
+GET {{base}}/api/public/{{slug}}/hotels/HOTEL_ID/offers?checkIn=2026-12-01&checkOut=2026-12-04&guests=2
+
+### Book a room type (response contains reference + accessCode; email goes to Mailpit, http://localhost:8025)
+POST {{base}}/api/public/{{slug}}/bookings
+Content-Type: application/json
+
+{ "hotelId": "HOTEL_ID", "roomType": "Suite", "checkIn": "2026-12-01", "checkOut": "2026-12-04", "numberOfGuests": 2,
+  "firstName": "Gina", "lastName": "Guest", "email": "gina@example.com" }
+
+### View own booking
+GET {{base}}/api/public/{{slug}}/bookings/BK-REFERENCE
+X-Booking-Code: ACCESS-CODE-HERE
+
+### Cancel own booking (until 24h before arrival day)
+POST {{base}}/api/public/{{slug}}/bookings/BK-REFERENCE/cancel
+X-Booking-Code: ACCESS-CODE-HERE
+
+### ===== Sessions =====
+### Swap a refresh token (from login) for a new access + refresh pair; the old refresh token stops working
+POST {{base}}/api/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "REFRESH_TOKEN_FROM_LOGIN" }
+
+### End the session
+POST {{base}}/api/auth/logout
+Content-Type: application/json
+
+{ "refreshToken": "REFRESH_TOKEN_FROM_LOGIN" }
+
+### ===== GDPR (Admin/Manager) =====
+### Export everything held about a guest
+GET {{base}}/api/guests/GUEST_ID/export
+Authorization: Bearer {{token}}
+
+### Erase the guest's personal data (not allowed while a stay is upcoming/ongoing)
+POST {{base}}/api/guests/GUEST_ID/anonymize
+Authorization: Bearer {{token}}

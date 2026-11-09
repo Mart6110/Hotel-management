@@ -1,0 +1,57 @@
+# Production override:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# - Caddy terminates TLS with automatic Let's Encrypt certificates for $DOMAIN
+#   (use DOMAIN=localhost to try it locally with a self-signed certificate).
+# - The API is no longer published; only Caddy can reach it.
+# - Every secret must come from .env: compose stops with an error if one is missing.
+# - Mailpit is not started; configure a real SMTP relay.
+
+services:
+  proxy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env, e.g. hotels.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  api:
+    restart: unless-stopped
+    ports: !reset []
+    depends_on: !override
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Https__BehindProxy: "true"
+      Jwt__Key: ${JWT_KEY:?Set JWT_KEY in .env}
+      Encryption__KeyId: ${ENCRYPTION_KEY_ID:?Set ENCRYPTION_KEY_ID in .env}
+      Encryption__Key: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env}
+      Encryption__BlindIndexKey: ${BLIND_INDEX_KEY:?Set BLIND_INDEX_KEY in .env}
+      Database__SeedSampleData: "false"
+      ConnectionStrings__Default: "Host=db;Port=5432;Database=hotel;Username=hotel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env};GSS Encryption Mode=Disable"
+      Email__Host: ${SMTP_HOST:?Set SMTP_HOST in .env}
+      Email__Port: ${SMTP_PORT:-587}
+      Email__Security: ${SMTP_SECURITY:-StartTls}
+
+  db:
+    restart: unless-stopped
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+
+  mailpit:
+    profiles: ["dev-only"]
+
+volumes:
+  caddy_data:
+  caddy_config:

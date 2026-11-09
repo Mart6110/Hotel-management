@@ -21,6 +21,7 @@ public interface IDatabaseInitializer
 internal class DatabaseInitializer(
     AppDbContext db,
     DemoDataSeeder seeder,
+    PersonalDataBackfill backfill,
     IOptions<DatabaseOptions> options,
     ILogger<DatabaseInitializer> logger) : IDatabaseInitializer
 {
@@ -30,6 +31,7 @@ internal class DatabaseInitializer(
         {
             logger.LogInformation("Applying database migrations");
             await db.Database.MigrateAsync(ct);
+            await backfill.RunAsync(ct);
         }
 
         if (options.Value.SeedSampleData && !await db.Companies.AnyAsync(ct))
@@ -41,7 +43,7 @@ internal class DatabaseInitializer(
 }
 
 /// <summary>Creates a demo company with staff, hotels, rooms, guests and bookings.</summary>
-internal class DemoDataSeeder(AppDbContext db, IPasswordHasher passwordHasher, TimeProvider clock)
+internal class DemoDataSeeder(AppDbContext db, IPasswordHasher passwordHasher, IBookingCodeGenerator codes, TimeProvider clock)
 {
     public const string DemoPassword = "Passw0rd!";
 
@@ -49,7 +51,8 @@ internal class DemoDataSeeder(AppDbContext db, IPasswordHasher passwordHasher, T
     {
         var now = clock.GetUtcNow().UtcDateTime;
         var today = DateOnly.FromDateTime(now);
-        var company = new Company("Demo Hotels Group");
+        const string companyName = "Demo Hotels Group";
+        var company = new Company(companyName, CompanySlug.FromName(companyName)); // "demo-hotels-group"
         var hash = passwordHasher.Hash(DemoPassword);
 
         // No signed-in user while seeding, so tenant ownership is assigned explicitly.
@@ -83,7 +86,7 @@ internal class DemoDataSeeder(AppDbContext db, IPasswordHasher passwordHasher, T
             Own(new Guest("John", "Smith", null, "+44 7700 900003")),
         };
 
-        var current = Booking.Create(rooms[1], guests[0], today, today.AddDays(3), 2, null, now);
+        var current = Booking.Create(rooms[1], guests[0], today, today.AddDays(3), 2, null, now, codes.NewReference());
         current.MarkCheckedIn(now);
         current.RecordPayment(current.PricePerNight, PaymentMethod.Card, "Deposit", now, null);
 
@@ -97,8 +100,8 @@ internal class DemoDataSeeder(AppDbContext db, IPasswordHasher passwordHasher, T
         db.Guests.AddRange(guests);
         db.Bookings.AddRange(
             current,
-            Booking.Create(rooms[3], guests[2], today.AddDays(7), today.AddDays(11), 3, null, now),
-            Booking.Create(rooms[13], guests[1], today.AddDays(14), today.AddDays(19), 2, null, now));
+            Booking.Create(rooms[3], guests[2], today.AddDays(7), today.AddDays(11), 3, null, now, codes.NewReference()),
+            Booking.Create(rooms[13], guests[1], today.AddDays(14), today.AddDays(19), 2, null, now, codes.NewReference()));
         await db.SaveChangesAsync(ct);
     }
 }
